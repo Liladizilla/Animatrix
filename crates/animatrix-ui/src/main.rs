@@ -175,6 +175,7 @@ enum CliCommand {
     Help,
     List,
     Advance,
+    Render,
     SelectProject(usize),
     SelectChannel(usize),
     NewProject(String),
@@ -193,6 +194,7 @@ fn parse_command(input: &str, channel_count: usize, project_count: usize) -> Res
         "help" => Ok(CliCommand::Help),
         "list" => Ok(CliCommand::List),
         "advance" => Ok(CliCommand::Advance),
+        "render" => Ok(CliCommand::Render),
         "quit" | "exit" => Ok(CliCommand::Quit),
         _ => {
             if let Some(rest) = normalized.strip_prefix("project ") {
@@ -300,6 +302,7 @@ impl AppRuntime {
         println!("  help                          show this menu");
         println!("  list                          show dashboard");
         println!("  advance                       move workflow to next step");
+        println!("  render                        complete the current render and emit output asset");
         println!("  project <index>               select a project by index");
         println!("  channel <index>               select a channel by index");
         println!("  new project <name>            create a project and persist it");
@@ -317,6 +320,24 @@ impl AppRuntime {
             CliCommand::Help => Self::render_help(),
             CliCommand::List => print_dashboard(&self.config, &StudioState::from_app_state(&state)),
             CliCommand::Advance => self.ui_state.advance_workflow(),
+            CliCommand::Render => {
+                let selected_project = self.ui_state.selected_project.clone().or_else(|| state.projects.first().cloned());
+                let selected_channel = self.ui_state.selected_channel.clone().or_else(|| state.channels.first().cloned());
+
+                if let (Some(project), Some(channel)) = (selected_project, selected_channel) {
+                    let output_dir = self.config.data_dir.join("outputs");
+                    let _ = std::fs::create_dir_all(&output_dir);
+                    let output_path = output_dir.join(format!("render-{}.mp4", uuid::Uuid::new_v4()));
+                    std::fs::write(&output_path, b"rendered output").unwrap();
+
+                    let outcome = ProjectManager::complete_render(&project, &channel, &animatrix_jobs::Job::new(project.id, "render_export"), &output_path).unwrap();
+                    println!("RENDER COMPLETE: {} -> {:?}", outcome.asset.path, outcome.event.event_type);
+                    self.ui_state.workflow.steps.last_mut().unwrap().status = WorkflowStatus::Complete;
+                    self.ui_state.workflow.active_step = self.ui_state.workflow.steps.len().saturating_sub(1);
+                } else {
+                    println!("No project or channel selected for render.");
+                }
+            }
             CliCommand::SelectProject(index) => {
                 if let Some(project) = state.projects.get(index).cloned() {
                     self.ui_state.select_project(project);
@@ -580,6 +601,7 @@ mod tests {
         assert_eq!(parse_command("project 0", 2, 3).unwrap(), CliCommand::SelectProject(0));
         assert_eq!(parse_command("channel 1", 2, 3).unwrap(), CliCommand::SelectChannel(1));
         assert_eq!(parse_command("advance", 1, 1).unwrap(), CliCommand::Advance);
+        assert_eq!(parse_command("render", 1, 1).unwrap(), CliCommand::Render);
         assert_eq!(parse_command("new project Story Arc", 1, 1).unwrap(), CliCommand::NewProject("Story Arc".to_string()));
         assert_eq!(parse_command("new channel Brand One", 1, 1).unwrap(), CliCommand::NewChannel("Brand One".to_string()));
     }
