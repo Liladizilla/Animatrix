@@ -1,6 +1,7 @@
 use animatrix_core::{AppResult, ChannelId, ProjectId, ProviderKind};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::path::Path;
 use uuid::Uuid;
 
@@ -67,11 +68,21 @@ impl AssetRegistry {
         }
     }
 
-    pub fn register_asset(
+    fn hash_file(path: &Path) -> AppResult<String> {
+        let contents = std::fs::read(path)
+            .map_err(|e| animatrix_core::AppError::new("asset_hash_read", e.to_string()))?;
+        let digest = Sha256::digest(&contents);
+        Ok(format!("sha256:{}", hex::encode(digest)))
+    }
+
+    pub fn register_asset_with_context(
         project_id: ProjectId,
         channel_id: ChannelId,
         asset_type: AssetType,
         source: AssetSource,
+        provider: Option<ProviderKind>,
+        model: Option<String>,
+        parent_asset: Option<AssetId>,
         path: impl AsRef<Path>,
     ) -> AppResult<Asset> {
         let path_buf = path.as_ref();
@@ -84,6 +95,9 @@ impl AssetRegistry {
         if let Ok(metadata) = std::fs::metadata(path_buf) {
             let size_bytes = metadata.len();
             let mime_type = Self::infer_mime_type(path_buf);
+            let hash = Self::hash_file(path_buf)?;
+            let provider_for_json = provider;
+            let model_for_json = model.clone();
 
             let asset = Asset {
                 id: AssetId(Uuid::new_v4()),
@@ -91,10 +105,10 @@ impl AssetRegistry {
                 channel_id,
                 asset_type,
                 source,
-                provider: None,
-                model: None,
+                provider,
+                model: model.clone(),
                 path: path_string,
-                hash: format!("sha256:{}", file_name),
+                hash: hash.clone(),
                 mime_type: mime_type.clone(),
                 size_bytes,
                 metadata: serde_json::json!({
@@ -103,21 +117,26 @@ impl AssetRegistry {
                     "exists": true,
                     "mime_type": mime_type,
                     "size_bytes": size_bytes,
+                    "hash": hash,
+                    "provider": provider_for_json,
+                    "model": model_for_json,
                 }),
                 created_at: Utc::now(),
-                parent_asset: None,
+                parent_asset,
             };
             return Ok(asset);
         }
 
+        let provider_for_json = provider;
+        let model_for_json = model.clone();
         let asset = Asset {
             id: AssetId(Uuid::new_v4()),
             project_id,
             channel_id,
             asset_type,
             source,
-            provider: None,
-            model: None,
+            provider,
+            model: model.clone(),
             path: path_string,
             hash: "sha256-placeholder".to_string(),
             mime_type: Self::infer_mime_type(path_buf),
@@ -126,11 +145,32 @@ impl AssetRegistry {
                 "file_name": file_name,
                 "path": path_buf.display().to_string(),
                 "exists": false,
+                "provider": provider_for_json,
+                "model": model_for_json,
             }),
             created_at: Utc::now(),
-            parent_asset: None,
+            parent_asset,
         };
         Ok(asset)
+    }
+
+    pub fn register_asset(
+        project_id: ProjectId,
+        channel_id: ChannelId,
+        asset_type: AssetType,
+        source: AssetSource,
+        path: impl AsRef<Path>,
+    ) -> AppResult<Asset> {
+        Self::register_asset_with_context(
+            project_id,
+            channel_id,
+            asset_type,
+            source,
+            None,
+            None,
+            None,
+            path,
+        )
     }
 }
 
@@ -177,6 +217,32 @@ mod tests {
         assert_eq!(asset.size_bytes, 11);
         assert_eq!(asset.mime_type, "text/plain");
         assert_eq!(asset.metadata["file_name"], temp_path.file_name().unwrap().to_string_lossy().as_ref());
+
+        let _ = std::fs::remove_file(temp_path);
+    }
+
+    #[test]
+    fn asset_registration_tracks_real_hash_and_provider_context() {
+        let project_id = ProjectId(Uuid::new_v4());
+        let channel_id = ChannelId(Uuid::new_v4());
+        let temp_path = std::env::temp_dir().join(format!("animatrix-asset-{}.txt", Uuid::new_v4()));
+        std::fs::write(&temp_path, b"animatrix-output").unwrap();
+
+        let asset = AssetRegistry::register_asset_with_context(
+            project_id,
+            channel_id,
+            AssetType::Video,
+            AssetSource::Generated,
+            Some(ProviderKind::Local),
+            Some("animatrix-ffmpeg".to_string()),
+            None,
+            &temp_path,
+        )
+        .unwrap();
+
+        assert!(asset.hash.starts_with("sha256:"));
+        assert_eq!(asset.provider, Some(ProviderKind::Local));
+        assert_eq!(asset.model.as_deref(), Some("animatrix-ffmpeg"));
 
         let _ = std::fs::remove_file(temp_path);
     }
