@@ -1,0 +1,18 @@
+[package]
+name = "animatrix-ui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+animatrix-core = { path = "../animatrix-core" }
+animatrix-domain = { path = "../animatrix-domain" }
+animatrix-project = { path = "../animatrix-project" }
+animatrix-jobs = { path = "../animatrix-jobs" }
+animatrix-ai = { path = "../animatrix-ai" }
+animatrix-storage = { path = "../animatrix-storage" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+eframe = "0.31"

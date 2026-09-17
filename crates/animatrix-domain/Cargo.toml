@@ -1,0 +1,11 @@
+[package]
+name = "animatrix-domain"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+animatrix-core = { path = "../animatrix-core" }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
