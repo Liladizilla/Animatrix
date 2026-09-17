@@ -1,14 +1,23 @@
-use animatrix_core::{AppResult, ChannelId, ProjectId};
+use animatrix_assets::{AssetRegistry, AssetSource, AssetType};
+use animatrix_core::{AppResult, ChannelId, ProjectId, ProviderKind};
 use animatrix_domain::{Channel, Project};
 use animatrix_events::{EventRecord, ProjectEventLog};
 use animatrix_jobs::{Job, JobManager};
 use chrono::Utc;
+use std::path::Path;
 
 #[derive(Debug, Clone)]
 pub struct ProjectWorkflow {
     pub project: Project,
     pub creation_event: EventRecord,
     pub initial_jobs: Vec<Job>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RenderOutcome {
+    pub job: Job,
+    pub asset: animatrix_assets::Asset,
+    pub event: EventRecord,
 }
 
 pub struct ProjectManager;
@@ -37,6 +46,36 @@ impl ProjectManager {
             project,
             creation_event,
             initial_jobs,
+        })
+    }
+
+    pub fn complete_render(
+        project: &Project,
+        channel: &Channel,
+        job: &Job,
+        output_path: impl AsRef<Path>,
+    ) -> AppResult<RenderOutcome> {
+        let output_path = output_path.as_ref();
+        let mut completed_job = job.clone();
+        completed_job.complete();
+
+        let asset = AssetRegistry::register_asset_with_context(
+            project.id,
+            channel.id,
+            AssetType::Video,
+            AssetSource::Generated,
+            Some(ProviderKind::Local),
+            Some("animatrix-render".to_string()),
+            None,
+            output_path,
+        )?;
+
+        let event = ProjectEventLog::render_completed(project.id, job.id, &asset.path)?;
+
+        Ok(RenderOutcome {
+            job: completed_job,
+            asset,
+            event,
         })
     }
 
@@ -87,5 +126,24 @@ mod tests {
         assert_eq!(workflow.initial_jobs.len(), 2);
         assert!(workflow.initial_jobs.iter().any(|job| job.job_type == "scene_generation"));
         assert!(workflow.initial_jobs.iter().any(|job| job.job_type == "render_export"));
+    }
+
+    #[test]
+    fn complete_render_creates_output_asset_and_event() {
+        let channel = ProjectManager::new_channel("Animatrix Studio", "AI video workflows");
+        let project = ProjectManager::create_project(&channel, "Pilot Episode", "First long-form video");
+        let job = animatrix_jobs::Job::new(project.id, "render_export");
+        let temp_path = std::env::temp_dir().join(format!("animatrix-render-{}.mp4", uuid::Uuid::new_v4()));
+        std::fs::write(&temp_path, b"fake-render").unwrap();
+
+        let outcome = ProjectManager::complete_render(&project, &channel, &job, &temp_path).unwrap();
+
+        assert_eq!(outcome.event.event_type, animatrix_events::EventType::RenderCompleted);
+        assert_eq!(outcome.asset.project_id, project.id);
+        assert_eq!(outcome.asset.channel_id, channel.id);
+        assert_eq!(outcome.asset.asset_type, AssetType::Video);
+        assert_eq!(outcome.job.status, animatrix_core::JobStatus::Completed);
+
+        let _ = std::fs::remove_file(temp_path);
     }
 }
