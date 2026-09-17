@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 animatrix-core = { path = "../animatrix-core" }
 animatrix-domain = { path = "../animatrix-domain" }
+animatrix-events = { path = "../animatrix-events" }
+animatrix-jobs = { path = "../animatrix-jobs" }
 chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

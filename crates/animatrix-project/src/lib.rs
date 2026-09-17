@@ -1,6 +1,15 @@
-use animatrix_core::{ChannelId, ProjectId};
+use animatrix_core::{AppResult, ChannelId, ProjectId};
 use animatrix_domain::{Channel, Project};
+use animatrix_events::{EventRecord, ProjectEventLog};
+use animatrix_jobs::{Job, JobManager};
 use chrono::Utc;
+
+#[derive(Debug, Clone)]
+pub struct ProjectWorkflow {
+    pub project: Project,
+    pub creation_event: EventRecord,
+    pub initial_jobs: Vec<Job>,
+}
 
 pub struct ProjectManager;
 
@@ -14,6 +23,21 @@ impl ProjectManager {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
+    }
+
+    pub fn create_workflow(channel: &Channel, name: &str, description: &str) -> AppResult<ProjectWorkflow> {
+        let project = Self::create_project(channel, name, description);
+        let creation_event = ProjectEventLog::project_created(project.id, name)?;
+        let initial_jobs = vec![
+            JobManager::new_scene_job(project.id),
+            JobManager::new_render_job(project.id),
+        ];
+
+        Ok(ProjectWorkflow {
+            project,
+            creation_event,
+            initial_jobs,
+        })
     }
 
     pub fn new_channel(name: &str, theme: &str) -> Channel {
@@ -50,5 +74,18 @@ mod tests {
         assert_eq!(project.channel_id, channel.id);
         assert_eq!(project.name, "Pilot Episode");
         assert_eq!(channel.brand.name, "Animatrix Studio");
+    }
+
+    #[test]
+    fn create_project_workflow_generates_event_and_jobs() {
+        let channel = ProjectManager::new_channel("Animatrix Studio", "AI video workflows");
+        let workflow = ProjectManager::create_workflow(&channel, "Pilot Episode", "First long-form video").unwrap();
+
+        assert_eq!(workflow.project.channel_id, channel.id);
+        assert_eq!(workflow.project.name, "Pilot Episode");
+        assert_eq!(workflow.creation_event.event_type, animatrix_events::EventType::ProjectCreated);
+        assert_eq!(workflow.initial_jobs.len(), 2);
+        assert!(workflow.initial_jobs.iter().any(|job| job.job_type == "scene_generation"));
+        assert!(workflow.initial_jobs.iter().any(|job| job.job_type == "render_export"));
     }
 }
