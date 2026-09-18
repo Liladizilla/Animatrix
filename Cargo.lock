@@ -177,6 +177,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -185,8 +186,10 @@ version = "0.1.0"
 dependencies = [
  "animatrix-core",
  "chrono",
+ "hex",
  "serde",
  "serde_json",
+ "sha2",
  "uuid",
 ]
 
@@ -232,6 +235,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
+ "tokio",
  "uuid",
 ]
 
@@ -239,8 +243,11 @@ dependencies = [
 name = "animatrix-project"
 version = "0.1.0"
 dependencies = [
+ "animatrix-assets",
  "animatrix-core",
  "animatrix-domain",
+ "animatrix-events",
+ "animatrix-jobs",
  "chrono",
  "serde",
  "serde_json",
@@ -267,6 +274,7 @@ name = "animatrix-ui"
 version = "0.1.0"
 dependencies = [
  "animatrix-ai",
+ "animatrix-assets",
  "animatrix-core",
  "animatrix-domain",
  "animatrix-jobs",

@@ -8,3 +8,4 @@ animatrix-core = { path = "../animatrix-core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
+uuid = { workspace = true }

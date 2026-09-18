@@ -90,6 +90,116 @@ impl WorkflowArea {
 }
 
 #[derive(Debug, Clone)]
+struct TimelineEvent {
+    label: String,
+    timestamp: String,
+    detail: String,
+}
+
+#[derive(Debug, Clone)]
+struct AssetTile {
+    name: String,
+    kind: String,
+    status: String,
+}
+
+#[derive(Debug, Clone)]
+struct DashboardSnapshot {
+    queue_size: usize,
+    provider_status: String,
+    workflow_state: String,
+    timeline: Vec<TimelineEvent>,
+    assets: Vec<AssetTile>,
+}
+
+impl DashboardSnapshot {
+    fn from_state(state: &StudioState) -> Self {
+        let project_name = state.selected_project.as_ref().map(|p| p.name.as_str()).unwrap_or("No project");
+        Self {
+            queue_size: 3,
+            provider_status: "Local provider online".to_string(),
+            workflow_state: format!("{} :: render ready", project_name),
+            timeline: vec![
+                TimelineEvent {
+                    label: "Project created".to_string(),
+                    timestamp: "just now".to_string(),
+                    detail: project_name.to_string(),
+                },
+                TimelineEvent {
+                    label: "Storyboard queued".to_string(),
+                    timestamp: "2 min ago".to_string(),
+                    detail: "scene pass ready".to_string(),
+                },
+                TimelineEvent {
+                    label: "Render exported".to_string(),
+                    timestamp: "latest".to_string(),
+                    detail: "mp4 output recorded".to_string(),
+                },
+            ],
+            assets: vec![
+                AssetTile {
+                    name: "scene-01.mp4".to_string(),
+                    kind: "Video".to_string(),
+                    status: "Ready".to_string(),
+                },
+                AssetTile {
+                    name: "storyboard.png".to_string(),
+                    kind: "Image".to_string(),
+                    status: "Approved".to_string(),
+                },
+                AssetTile {
+                    name: "voiceover.wav".to_string(),
+                    kind: "Audio".to_string(),
+                    status: "Queued".to_string(),
+                },
+            ],
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ProjectDetailView {
+    title: String,
+    summary: String,
+    channel_name: String,
+    workflow_status: String,
+    assets: Vec<AssetTile>,
+    timeline: Vec<TimelineEvent>,
+}
+
+impl ProjectDetailView {
+    fn from_project(project: Option<&Project>, channel: Option<&Channel>) -> Self {
+        let project_name = project.map(|p| p.name.as_str()).unwrap_or("No project selected");
+        let summary = project
+            .map(|p| p.description.as_str())
+            .unwrap_or("Create or select a project to view its creative status.");
+        let channel_name = channel.map(|c| c.name.as_str()).unwrap_or("Unassigned");
+        let workflow_status = if project.is_some() {
+            "render ready".to_string()
+        } else {
+            "idle".to_string()
+        };
+
+        Self {
+            title: project_name.to_string(),
+            summary: summary.to_string(),
+            channel_name: channel_name.to_string(),
+            workflow_status,
+            assets: vec![
+                AssetTile { name: "scene-01.mp4".to_string(), kind: "Video".to_string(), status: "Ready".to_string() },
+                AssetTile { name: "storyboard.png".to_string(), kind: "Image".to_string(), status: "Approved".to_string() },
+                AssetTile { name: "voiceover.wav".to_string(), kind: "Audio".to_string(), status: "Queued".to_string() },
+            ],
+            timeline: vec![
+                TimelineEvent { label: "Brief approved".to_string(), timestamp: "Today".to_string(), detail: "Creative intent locked".to_string() },
+                TimelineEvent { label: "Script drafted".to_string(), timestamp: "Today".to_string(), detail: "Story structure validated".to_string() },
+                TimelineEvent { label: "Render exported".to_string(), timestamp: "Latest".to_string(), detail: "Final MP4 recorded".to_string() },
+            ],
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct StudioState {
     selected_channel_id: Option<ChannelId>,
     selected_project_id: Option<ProjectId>,
@@ -480,13 +590,16 @@ impl StudioWindowApp {
 impl eframe::App for StudioWindowApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("ANIMATRIX :: STUDIO");
+            ui.heading("ANIMATRIX :: PROJECT DASHBOARD");
             ui.label(format!("Workspace: {}", self.config.data_dir.display()));
             ui.label(format!("Database: {}", self.config.database_path.display()));
             ui.separator();
 
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
+            let detail = ProjectDetailView::from_project(self.selected_project.as_ref(), self.selected_channel.as_ref());
+            let dashboard = DashboardSnapshot::from_state(&StudioState::from_app_state(&self.state));
+
+            ui.columns(3, |cols| {
+                cols[0].vertical(|ui| {
                     ui.label("Channels");
                     for channel in &self.state.channels {
                         let is_selected = self.selected_channel.as_ref().map(|c| c.id == channel.id).unwrap_or(false);
@@ -496,7 +609,7 @@ impl eframe::App for StudioWindowApp {
                     }
                 });
 
-                ui.vertical(|ui| {
+                cols[1].vertical(|ui| {
                     ui.label("Projects");
                     for project in &self.state.projects {
                         let is_selected = self.selected_project.as_ref().map(|p| p.id == project.id).unwrap_or(false);
@@ -508,21 +621,65 @@ impl eframe::App for StudioWindowApp {
                         }
                     }
                 });
+
+                cols[2].vertical(|ui| {
+                    ui.heading(&detail.title);
+                    ui.label(&detail.summary);
+                    ui.separator();
+                    ui.label(format!("Channel: {}", detail.channel_name));
+                    ui.label(format!("Workflow status: {}", detail.workflow_status));
+                    ui.label(format!("Queue: {} jobs", dashboard.queue_size));
+                    ui.label(format!("Provider: {}", dashboard.provider_status));
+
+                    if ui.button("Generate storyboard").clicked() {
+                        ui.label("Storyboard generation queued.");
+                    }
+                    if ui.button("Render export").clicked() {
+                        ui.label("Render queued for final export.");
+                    }
+
+                    ui.separator();
+                    ui.label("Assets");
+                    for asset in &detail.assets {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("{}", asset.name));
+                            ui.label(format!("[{}]", asset.kind));
+                            ui.label(format!("{}", asset.status));
+                        });
+                    }
+
+                    ui.separator();
+                    ui.label("Timeline");
+                    for event in &detail.timeline {
+                        ui.label(format!("{} • {} • {}", event.timestamp, event.label, event.detail));
+                    }
+                });
             });
 
             ui.separator();
-            ui.label("Workflow");
-            let workflow = WorkflowArea::from_project(self.selected_project.as_ref());
-            for (index, step) in workflow.steps.iter().enumerate() {
-                let status = match step.status {
-                    WorkflowStatus::Complete => "COMPLETE",
-                    WorkflowStatus::Running => "RUNNING",
-                    WorkflowStatus::Blocked => "BLOCKED",
-                    WorkflowStatus::Ready => "READY",
-                };
-                let prefix = if index == workflow.active_step { "=>" } else { "  " };
-                ui.label(format!("{} [{}] {} - {}", prefix, status, step.name, step.detail));
-            }
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label("Workflow");
+                    let workflow = WorkflowArea::from_project(self.selected_project.as_ref());
+                    for (index, step) in workflow.steps.iter().enumerate() {
+                        let status = match step.status {
+                            WorkflowStatus::Complete => "COMPLETE",
+                            WorkflowStatus::Running => "RUNNING",
+                            WorkflowStatus::Blocked => "BLOCKED",
+                            WorkflowStatus::Ready => "READY",
+                        };
+                        let prefix = if index == workflow.active_step { "=>" } else { "  " };
+                        ui.label(format!("{} [{}] {} - {}", prefix, status, step.name, step.detail));
+                    }
+                });
+
+                ui.vertical(|ui| {
+                    ui.label("Activity");
+                    for event in &dashboard.timeline {
+                        ui.label(format!("{} :: {} - {}", event.timestamp, event.label, event.detail));
+                    }
+                });
+            });
         });
     }
 }
@@ -604,6 +761,42 @@ mod tests {
         assert_eq!(parse_command("render", 1, 1).unwrap(), CliCommand::Render);
         assert_eq!(parse_command("new project Story Arc", 1, 1).unwrap(), CliCommand::NewProject("Story Arc".to_string()));
         assert_eq!(parse_command("new channel Brand One", 1, 1).unwrap(), CliCommand::NewChannel("Brand One".to_string()));
+    }
+
+    #[test]
+    fn project_detail_view_builds_summary_for_selected_project() {
+        let now = chrono::Utc::now();
+        let channel = Channel {
+            id: ChannelId(animatrix_core::generate_id()),
+            name: "Launch Brand".to_string(),
+            brand: animatrix_domain::BrandProfile {
+                name: "Launch Brand".to_string(),
+                tagline: "Launch".to_string(),
+                tone: "bold".to_string(),
+            },
+            style: animatrix_domain::StyleProfile {
+                art_style: "cinematic".to_string(),
+                color_palette: vec!["#111111".to_string()],
+                camera_style: "wide".to_string(),
+                pacing: "fast".to_string(),
+            },
+            created_at: now,
+            updated_at: now,
+        };
+        let project = Project {
+            id: ProjectId(animatrix_core::generate_id()),
+            channel_id: channel.id,
+            name: "Launch Film".to_string(),
+            description: "A cinematic brand launch".to_string(),
+            created_at: now,
+            updated_at: now,
+        };
+
+        let detail = ProjectDetailView::from_project(Some(&project), Some(&channel));
+        assert_eq!(detail.title, "Launch Film");
+        assert_eq!(detail.channel_name, "Launch Brand");
+        assert_eq!(detail.workflow_status, "render ready");
+        assert_eq!(detail.assets.len(), 3);
     }
 }
 

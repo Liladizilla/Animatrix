@@ -1,6 +1,7 @@
 use animatrix_core::{JobId, JobStatus, ProjectId};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +60,64 @@ impl Job {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct JobQueue {
+    jobs: Vec<Job>,
+}
+
+impl JobQueue {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn enqueue(&mut self, job: Job) {
+        self.jobs.push(job);
+    }
+
+    pub fn next_pending(&mut self) -> Option<Job> {
+        if self.jobs.is_empty() {
+            return None;
+        }
+
+        let index = self.jobs.iter().position(|job| job.status == JobStatus::Queued)?;
+        let job = self.jobs.remove(index);
+        Some(job)
+    }
+
+    pub fn len(&self) -> usize {
+        self.jobs.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.jobs.is_empty()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct JobWorker {
+    project_id: ProjectId,
+}
+
+impl JobWorker {
+    pub fn new(project_id: ProjectId) -> Self {
+        Self { project_id }
+    }
+
+    pub async fn run_one(&self, queue: Arc<Mutex<JobQueue>>) -> Option<Job> {
+        let mut queue_guard = queue.lock().expect("job queue lock poisoned");
+        let mut job = queue_guard.next_pending()?;
+
+        job.attempts += 1;
+        job.start();
+        job.advance(45);
+        job.advance(75);
+        job.advance(95);
+        job.complete();
+
+        Some(job)
+    }
+}
+
 pub struct JobManager;
 
 impl JobManager {
@@ -98,5 +157,50 @@ mod tests {
         job.complete();
         assert_eq!(job.status, JobStatus::Completed);
         assert_eq!(job.progress, 100);
+    }
+
+    #[test]
+    fn job_queue_tracks_pending_work() {
+        let mut queue = JobQueue::new();
+        let project_id = ProjectId(Uuid::new_v4());
+        queue.enqueue(JobManager::new_scene_job(project_id));
+        assert_eq!(queue.len(), 1);
+
+        let next = queue.next_pending().unwrap();
+        assert_eq!(next.job_type, "scene_generation");
+        assert!(queue.is_empty());
+    }
+
+    #[tokio::test]
+    async fn job_worker_processes_queued_job() {
+        let project_id = ProjectId(Uuid::new_v4());
+        let queue = Arc::new(Mutex::new(JobQueue::new()));
+        {
+            let mut queue_guard = queue.lock().expect("lock queue");
+            queue_guard.enqueue(JobManager::new_render_job(project_id));
+        }
+
+        let worker = JobWorker::new(project_id);
+        let completed = worker.run_one(queue.clone()).await.expect("queue should contain a job");
+        assert_eq!(completed.status, JobStatus::Completed);
+        assert_eq!(completed.progress, 100);
+        assert_eq!(completed.attempts, 1);
+    }
+
+    #[tokio::test]
+    async fn job_worker_queues_render_progress_steps() {
+        let project_id = ProjectId(Uuid::new_v4());
+        let queue = Arc::new(Mutex::new(JobQueue::new()));
+        {
+            let mut queue_guard = queue.lock().expect("lock queue");
+            queue_guard.enqueue(JobManager::new_render_job(project_id));
+        }
+
+        let worker = JobWorker::new(project_id);
+        let completed = worker.run_one(queue.clone()).await.expect("queue should contain a job");
+
+        assert!(matches!(completed.status, JobStatus::Completed));
+        assert!(completed.progress >= 90);
+        assert_eq!(completed.attempts, 1);
     }
 }

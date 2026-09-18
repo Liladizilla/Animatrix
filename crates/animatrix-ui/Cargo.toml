@@ -9,6 +9,7 @@ animatrix-domain = { path = "../animatrix-domain" }
 animatrix-project = { path = "../animatrix-project" }
 animatrix-jobs = { path = "../animatrix-jobs" }
 animatrix-ai = { path = "../animatrix-ai" }
+animatrix-assets = { path = "../animatrix-assets" }
 animatrix-storage = { path = "../animatrix-storage" }
 serde = { workspace = true }
 serde_json = { workspace = true }
