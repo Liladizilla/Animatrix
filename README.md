@@ -1,54 +1,90 @@
 # Animatrix
 
-Animatrix is a Rust-first local studio for AI-assisted video production. It is designed as a local-first creative workflow where channels, projects, assets, jobs, and event history are all kept in a durable local state while the user works through scenes, story direction, and final render/export steps.
+Animatrix is a Rust-first local studio for AI-assisted video production. It is designed as a durable creative workstation where channels, projects, assets, jobs, and event history stay locally persisted while a creator moves from concept to script to render.
 
-## Product direction
+## Product vision
 
-The platform is organized around a small set of core concepts:
+Animatrix is built for a simple local-first production flow:
 
-- Channels: brand or studio lanes with identity and visual style
-- Projects: production workstreams mapped to a channel
-- Assets: source and output media plus metadata
-- Jobs: queued, running, completed, or failed production tasks
-- Events: workflow history for traceability and debugging
+- create a brand or channel
+- launch a project within that channel
+- assemble scripts, story beats, and media assets
+- queue generation and render tasks
+- review output history and project timeline
+- keep everything stored locally for fast iteration
 
-The system is intentionally split into Rust crates so the app stays structured and local-first:
+This makes the tool useful for creators who want to iterate privately without depending on a fragile cloud pipeline for every step.
+
+## Core architecture
+
+The system is intentionally split into Rust crates to keep the domain model, workflow logic, and persistence cleanly separated:
 
 - `animatrix-core`: shared IDs, app errors, and base enums
-- `animatrix-domain`: primary domain models
-- `animatrix-project`: project and channel creation helpers
-- `animatrix-storage`: SQLite persistence for durable local state
-- `animatrix-assets`: asset metadata and provenance handling
-- `animatrix-events`: event log and workflow traceability
-- `animatrix-jobs`: job lifecycle management
-- `animatrix-ai`: model/provider abstraction
-- `animatrix-ui`: terminal dashboard and workspace shell
+- `animatrix-domain`: primary studio domain models such as channels, projects, scripts, and brand profiles
+- `animatrix-project`: orchestration for project and channel creation, render completion, and workflow mutation
+- `animatrix-storage`: SQLite-backed persistence with durable local state
+- `animatrix-assets`: asset metadata, provenance, and media tracking
+- `animatrix-events`: event log and workflow timeline traceability
+- `animatrix-jobs`: queued job lifecycle management and worker execution flow
+- `animatrix-ai`: provider abstraction and model-task routing
+- `animatrix-ui`: dashboard shell, workflow view, and project interaction layer
 
-## Current status
+## Current implementation status
 
-The repository is in a working implementation phase. The core foundation is stable and validated:
+The repo is in a working product foundation stage with real structure behind it:
 
-- project and channel persistence works through SQLite-backed local state
-- workflow selection and app reload behavior are stable
+- channel and project persistence works through SQLite-backed local state
+- workflow selection and reload behavior are stable
 - asset metadata and provenance hashing are in place
-- lifecycle event logging is present for traceability
+- lifecycle event logging is present for auditability
 - job transitions exist for queued, running, completed, and failed states
-- the workspace test suite passes across all implemented crates
+- provider resolution is no longer a single local-only stub
+- the workspace test suite passes across implemented crates
 
-## Local-first architecture
+## Workflow model
 
-Animatrix is designed as a durable creative workstation for AI-assisted video production:
+The product is designed around a layered creative pipeline:
 
-- Channels represent brand or studio lanes with identity and visual style
-- Projects represent production workstreams attached to a channel
-- Assets capture generated or source media with metadata and hash provenance
-- Jobs track execution context for scene generation and render/export work
-- Events provide a project timeline for debugging, auditing, and workflow traceability
-- Storage persists the local state under the user's home directory in `.animatrix/data/animatrix.db`
+1. Brand and visual identity
+2. Project creation and planning
+3. Script/storyboard generation
+4. Asset generation and review
+5. Render/export job queue
+6. Final output timeline and event history
 
-## Running locally
+This gives the studio a realistic creative workflow rather than a flat single-screen prototype.
 
-### Build
+## Local-first persistence
+
+Animatrix stores its primary state under the local user profile in `.animatrix`, keeping the project durable and offline-friendly:
+
+- SQLite database path: `.animatrix/data/animatrix.db`
+- project-specific outputs in local data folders
+- timeline and event history preserved locally
+- provider selection and queue state retained across runs
+
+## Demo / screen capture
+
+The project includes a running product walkthrough that demonstrates the dashboard, workflow flow, and project interactions.
+
+Embedded demo video:
+
+```html
+<video controls muted playsinline width="100%">
+  <source src="docs/media/animatrix-demo.mp4" type="video/mp4" />
+  Your browser does not support the video tag.
+</video>
+```
+
+The actual recorded asset is committed under:
+
+```text
+docs/media/animatrix-demo.mp4
+```
+
+## Quick start
+
+### Install dependencies
 
 ```bash
 cargo build
@@ -60,7 +96,7 @@ cargo build
 cargo run -p animatrix-ui -- --cli
 ```
 
-### Run tests
+### Run the test suite
 
 ```bash
 cargo test --quiet
@@ -81,15 +117,15 @@ Animatrix/
 │   ├── animatrix-project/
 │   ├── animatrix-storage/
 │   └── animatrix-ui/
+├── docs/
+│   └── media/
+│       └── animatrix-demo.mp4
 ├── README.md
 ├── target/
+├── Cargo.lock
 └── .gitignore
 ```
 
-## Notes
-
-This project is intentionally local-first. It stores state under the user's home directory in `.animatrix`, with SQLite-backed persistence and a Rust-based workflow shell.
-
 ## Repository workflow
 
-From here forward, meaningful changes will be committed and pushed to GitHub as they are added.
+Meaningful product changes are committed and pushed to GitHub as the project matures. The repository is intended to reflect the actual working state of the local-first creative studio.
