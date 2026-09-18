@@ -26,14 +26,25 @@ The system is intentionally split into Rust crates so the app stays structured a
 
 ## Current status
 
-The repository is in an active implementation phase. The core foundation is stable and validated:
+The repository is in a working implementation phase. The core foundation is stable and validated:
 
-- project/channel persistence works
-- workflow selection is preserved across reloads
-- asset metadata support is in place
-- event logging is present for lifecycle tracking
-- job lifecycle transitions exist for queued/running/completed/failed states
-- the project test suite passes for the implemented crates
+- project and channel persistence works through SQLite-backed local state
+- workflow selection and app reload behavior are stable
+- asset metadata and provenance hashing are in place
+- lifecycle event logging is present for traceability
+- job transitions exist for queued, running, completed, and failed states
+- the workspace test suite passes across all implemented crates
+
+## Local-first architecture
+
+Animatrix is designed as a durable creative workstation for AI-assisted video production:
+
+- Channels represent brand or studio lanes with identity and visual style
+- Projects represent production workstreams attached to a channel
+- Assets capture generated or source media with metadata and hash provenance
+- Jobs track execution context for scene generation and render/export work
+- Events provide a project timeline for debugging, auditing, and workflow traceability
+- Storage persists the local state under the user's home directory in `.animatrix/data/animatrix.db`
 
 ## Running locally
 
@@ -50,10 +61,6 @@ cargo run -p animatrix-ui -- --cli
 ```
 
 ### Run tests
-
-```bash
-git push
-```
 
 ```bash
 cargo test --quiet
