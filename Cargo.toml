@@ -3,11 +3,13 @@ members = [
   "crates/animatrix-core",
   "crates/animatrix-domain",
   "crates/animatrix-ai",
+  "crates/animatrix-ai-router",
   "crates/animatrix-jobs",
   "crates/animatrix-project",
   "crates/animatrix-assets",
   "crates/animatrix-events",
   "crates/animatrix-storage",
+  "crates/animatrix-application",
   "crates/animatrix-ui",
 ]
 resolver = "2"

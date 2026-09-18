@@ -1,7 +1,7 @@
 use animatrix_assets::{AssetRegistry, AssetSource, AssetType};
 use animatrix_core::{AppResult, ChannelId, ProjectId, ProviderKind};
 use animatrix_domain::{Channel, Project};
-use animatrix_events::{EventRecord, ProjectEventLog};
+use animatrix_events::{EventRecord, EventStore, ProjectEventLog};
 use animatrix_jobs::{Job, JobManager};
 use chrono::Utc;
 use std::path::Path;
@@ -34,9 +34,14 @@ impl ProjectManager {
         }
     }
 
-    pub fn create_workflow(channel: &Channel, name: &str, description: &str) -> AppResult<ProjectWorkflow> {
+    pub async fn create_workflow(
+        event_store: &EventStore,
+        channel: &Channel,
+        name: &str,
+        description: &str,
+    ) -> AppResult<ProjectWorkflow> {
         let project = Self::create_project(channel, name, description);
-        let creation_event = ProjectEventLog::project_created(project.id, name)?;
+        let creation_event = ProjectEventLog::project_created(event_store, project.id, name).await?;
         let initial_jobs = vec![
             JobManager::new_scene_job(project.id),
             JobManager::new_render_job(project.id),
@@ -49,7 +54,8 @@ impl ProjectManager {
         })
     }
 
-    pub fn complete_render(
+    pub async fn complete_render(
+        event_store: &EventStore,
         project: &Project,
         channel: &Channel,
         job: &Job,
@@ -70,7 +76,7 @@ impl ProjectManager {
             output_path,
         )?;
 
-        let event = ProjectEventLog::render_completed(project.id, job.id, &asset.path)?;
+        let event = ProjectEventLog::render_completed(event_store, project.id, job.id, &asset.path).await?;
 
         Ok(RenderOutcome {
             job: completed_job,
@@ -104,9 +110,18 @@ impl ProjectManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use animatrix_events::EventStore;
+    use sqlx::SqlitePool;
 
-    #[test]
-    fn create_project_from_channel() {
+    async fn setup_event_store() -> EventStore {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let store = EventStore::new(pool);
+        store.init().await.unwrap();
+        store
+    }
+
+    #[tokio::test]
+    async fn create_project_from_channel() {
         let channel = ProjectManager::new_channel("Animatrix Studio", "AI video workflows");
         let project = ProjectManager::create_project(&channel, "Pilot Episode", "First long-form video");
 
@@ -115,10 +130,11 @@ mod tests {
         assert_eq!(channel.brand.name, "Animatrix Studio");
     }
 
-    #[test]
-    fn create_project_workflow_generates_event_and_jobs() {
+    #[tokio::test]
+    async fn create_project_workflow_generates_event_and_jobs() {
         let channel = ProjectManager::new_channel("Animatrix Studio", "AI video workflows");
-        let workflow = ProjectManager::create_workflow(&channel, "Pilot Episode", "First long-form video").unwrap();
+        let store = setup_event_store().await;
+        let workflow = ProjectManager::create_workflow(&store, &channel, "Pilot Episode", "First long-form video").await.unwrap();
 
         assert_eq!(workflow.project.channel_id, channel.id);
         assert_eq!(workflow.project.name, "Pilot Episode");
@@ -128,15 +144,16 @@ mod tests {
         assert!(workflow.initial_jobs.iter().any(|job| job.job_type == "render_export"));
     }
 
-    #[test]
-    fn complete_render_creates_output_asset_and_event() {
+    #[tokio::test]
+    async fn complete_render_creates_output_asset_and_event() {
         let channel = ProjectManager::new_channel("Animatrix Studio", "AI video workflows");
         let project = ProjectManager::create_project(&channel, "Pilot Episode", "First long-form video");
+        let store = setup_event_store().await;
         let job = animatrix_jobs::Job::new(project.id, "render_export");
         let temp_path = std::env::temp_dir().join(format!("animatrix-render-{}.mp4", uuid::Uuid::new_v4()));
         std::fs::write(&temp_path, b"fake-render").unwrap();
 
-        let outcome = ProjectManager::complete_render(&project, &channel, &job, &temp_path).unwrap();
+        let outcome = ProjectManager::complete_render(&store, &project, &channel, &job, &temp_path).await.unwrap();
 
         assert_eq!(outcome.event.event_type, animatrix_events::EventType::RenderCompleted);
         assert_eq!(outcome.asset.project_id, project.id);

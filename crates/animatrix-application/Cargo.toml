@@ -1,12 +1,11 @@
 [package]
-name = "animatrix-ui"
+name = "animatrix-application"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 animatrix-ai = { path = "../animatrix-ai" }
 animatrix-ai-router = { path = "../animatrix-ai-router" }
-animatrix-application = { path = "../animatrix-application" }
 animatrix-assets = { path = "../animatrix-assets" }
 animatrix-core = { path = "../animatrix-core" }
 animatrix-domain = { path = "../animatrix-domain" }
@@ -14,9 +13,12 @@ animatrix-events = { path = "../animatrix-events" }
 animatrix-jobs = { path = "../animatrix-jobs" }
 animatrix-project = { path = "../animatrix-project" }
 animatrix-storage = { path = "../animatrix-storage" }
+chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-chrono = { workspace = true }
+tracing = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }
-eframe = "0.31"
+
+[dev-dependencies]
+sqlx = { workspace = true }

@@ -24,9 +24,11 @@ The system is intentionally split into Rust crates to keep the domain model, wor
 - `animatrix-project`: orchestration for project and channel creation, render completion, and workflow mutation
 - `animatrix-storage`: SQLite-backed persistence with durable local state
 - `animatrix-assets`: asset metadata, provenance, and media tracking
-- `animatrix-events`: event log and workflow timeline traceability
+- `animatrix-events`: event log and workflow timeline traceability with outbox pattern
 - `animatrix-jobs`: queued job lifecycle management and worker execution flow
 - `animatrix-ai`: provider abstraction and model-task routing
+- `animatrix-ai-router`: capability-matching, health-aware provider router with fallback
+- `animatrix-application`: application service layer with use cases (create_channel, create_project, queue_generation, complete_render, run_worker, dispatch_outbox)
 - `animatrix-ui`: dashboard shell, workflow view, and project interaction layer
 
 ## Current implementation status

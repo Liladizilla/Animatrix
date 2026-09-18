@@ -1,6 +1,7 @@
 use animatrix_ai::{ModelRequest, PolicyMode, Provider, TaskKind};
-use animatrix_core::{AppResult, ChannelId, ProjectId, ProviderKind};
+use animatrix_core::{AppResult, ChannelId, ProviderKind, ProjectId};
 use animatrix_domain::{Channel, Project};
+use animatrix_events::EventStore;
 use animatrix_project::ProjectManager;
 use animatrix_storage::{AppConfig, AppState, LocalStore};
 use eframe::egui;
@@ -440,7 +441,8 @@ impl AppRuntime {
                     let output_path = output_dir.join(format!("render-{}.mp4", uuid::Uuid::new_v4()));
                     std::fs::write(&output_path, b"rendered output").unwrap();
 
-                    let outcome = ProjectManager::complete_render(&project, &channel, &animatrix_jobs::Job::new(project.id, "render_export"), &output_path).unwrap();
+                    let event_store = EventStore::new(self.store.pool().clone());
+                    let outcome = ProjectManager::complete_render(&event_store, &project, &channel, &animatrix_jobs::Job::new(project.id, "render_export"), &output_path).await.unwrap();
                     println!("RENDER COMPLETE: {} -> {:?}", outcome.asset.path, outcome.event.event_type);
                     self.ui_state.workflow.steps.last_mut().unwrap().status = WorkflowStatus::Complete;
                     self.ui_state.workflow.active_step = self.ui_state.workflow.steps.len().saturating_sub(1);
@@ -512,6 +514,32 @@ fn render_workflow(workflow: &WorkflowArea) {
             WorkflowStatus::Ready => "READY",
         };
         println!("{} [{}] {} - {}", marker, status, step.name, step.detail);
+    }
+}
+
+fn render_asset_gallery(ui: &mut egui::Ui, assets: &[AssetTile]) {
+    ui.label("Asset gallery");
+    ui.columns(assets.len().min(3), |cols| {
+        for (index, asset) in assets.iter().enumerate() {
+            cols[index % cols.len()].vertical(|ui| {
+                ui.group(|ui| {
+                    ui.label(format!("{}", asset.name));
+                    ui.label(format!("Type: {}", asset.kind));
+                    ui.label(format!("Status: {}", asset.status));
+                });
+            });
+        }
+    });
+}
+
+fn render_timeline(ui: &mut egui::Ui, timeline: &[TimelineEvent]) {
+    ui.label("Timeline");
+    for event in timeline {
+        ui.horizontal(|ui| {
+            ui.label(format!("{}", event.timestamp));
+            ui.label(format!("{}", event.label));
+            ui.label(format!("- {}", event.detail));
+        });
     }
 }
 
@@ -639,20 +667,10 @@ impl eframe::App for StudioWindowApp {
                     }
 
                     ui.separator();
-                    ui.label("Assets");
-                    for asset in &detail.assets {
-                        ui.horizontal(|ui| {
-                            ui.label(format!("{}", asset.name));
-                            ui.label(format!("[{}]", asset.kind));
-                            ui.label(format!("{}", asset.status));
-                        });
-                    }
+                    render_asset_gallery(ui, &detail.assets);
 
                     ui.separator();
-                    ui.label("Timeline");
-                    for event in &detail.timeline {
-                        ui.label(format!("{} • {} • {}", event.timestamp, event.label, event.detail));
-                    }
+                    render_timeline(ui, &detail.timeline);
                 });
             });
 
@@ -675,9 +693,7 @@ impl eframe::App for StudioWindowApp {
 
                 ui.vertical(|ui| {
                     ui.label("Activity");
-                    for event in &dashboard.timeline {
-                        ui.label(format!("{} :: {} - {}", event.timestamp, event.label, event.detail));
-                    }
+                    render_timeline(ui, &dashboard.timeline);
                 });
             });
         });

@@ -1,8 +1,11 @@
 use animatrix_core::{AppError, AppResult, ChannelId, ProjectId};
-use animatrix_domain::{BrandProfile, Channel, Project, StyleProfile};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool, Row};
+use uuid::Uuid;
 use std::path::PathBuf;
+
+pub use animatrix_domain::{BrandProfile, Channel, Project, StyleProfile};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppState {
@@ -63,6 +66,12 @@ impl LocalStore {
             .await
             .map_err(|e| AppError::new("db_connect", e.to_string()))?;
 
+        Self::init_tables(&pool).await?;
+
+        Ok(Self { pool, config: config.clone() })
+    }
+
+    async fn init_tables(pool: &SqlitePool) -> AppResult<()> {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS channels (
@@ -75,7 +84,7 @@ impl LocalStore {
             );
             "#,
         )
-        .execute(&pool)
+        .execute(pool)
         .await
         .map_err(|e| AppError::new("db_init", e.to_string()))?;
 
@@ -91,18 +100,151 @@ impl LocalStore {
             );
             "#,
         )
-        .execute(&pool)
+        .execute(pool)
         .await
         .map_err(|e| AppError::new("db_init", e.to_string()))?;
 
-        Ok(Self {
-            pool,
-            config: config.clone(),
-        })
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS assets (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                asset_type TEXT NOT NULL,
+                source TEXT NOT NULL,
+                provider TEXT,
+                model TEXT,
+                path TEXT NOT NULL,
+                hash TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                metadata TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                parent_asset TEXT
+            );
+            "#,
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| AppError::new("db_init", e.to_string()))?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS providers (
+                id TEXT PRIMARY KEY,
+                provider_kind TEXT NOT NULL,
+                health TEXT NOT NULL,
+                last_probe_at TEXT,
+                p95_latency_ms INTEGER,
+                failure_rate REAL NOT NULL DEFAULT 0.0,
+                quota_remaining INTEGER,
+                rate_limit_reset_at TEXT,
+                updated_at TEXT NOT NULL
+            );
+            "#,
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| AppError::new("db_init", e.to_string()))?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS jobs (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                graph_node_id TEXT,
+                job_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                generation_status TEXT NOT NULL,
+                priority INTEGER NOT NULL DEFAULT 5,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                idempotency_key TEXT NOT NULL,
+                correlation_id TEXT NOT NULL,
+                inputs TEXT NOT NULL,
+                output_requirements TEXT NOT NULL,
+                cost_ceiling TEXT,
+                approval_gate TEXT,
+                progress INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                error_code TEXT,
+                retryable INTEGER NOT NULL DEFAULT 0,
+                retry_after_seconds INTEGER,
+                metrics TEXT,
+                started_at TEXT,
+                finished_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            "#,
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| AppError::new("db_init", e.to_string()))?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS job_attempts (
+                id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                worker_id TEXT,
+                transport TEXT NOT NULL,
+                request TEXT NOT NULL,
+                response TEXT,
+                logs TEXT NOT NULL DEFAULT '[]',
+                metrics TEXT,
+                status TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                created_at TEXT NOT NULL
+            );
+            "#,
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| AppError::new("db_init", e.to_string()))?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS events (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                job_id TEXT,
+                event_type TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            "#,
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| AppError::new("db_init", e.to_string()))?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS outbox (
+                id TEXT PRIMARY KEY,
+                event_id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                dispatched_at TEXT
+            );
+            "#,
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| AppError::new("db_init", e.to_string()))?;
+
+        Ok(())
     }
 
     pub fn config(&self) -> &AppConfig {
         &self.config
+    }
+
+    pub fn pool(&self) -> &SqlitePool {
+        &self.pool
     }
 
     pub async fn save_channel(&self, channel: &Channel) -> AppResult<()> {
@@ -135,6 +277,104 @@ impl LocalStore {
         .execute(&self.pool)
         .await
         .map_err(|e| AppError::new("save_project", e.to_string()))?;
+
+        Ok(())
+    }
+
+    pub async fn save_job(&self, job: &animatrix_jobs::Job) -> AppResult<()> {
+        sqlx::query(
+            r#"
+            INSERT OR REPLACE INTO jobs (
+                id, project_id, graph_node_id, job_type, status, generation_status,
+                priority, attempts, idempotency_key, correlation_id, inputs,
+                output_requirements, cost_ceiling, approval_gate, progress,
+                error, error_code, retryable, retry_after_seconds, metrics,
+                started_at, finished_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(job.id.0.to_string())
+        .bind(job.project_id.0.to_string())
+        .bind(job.graph_node_id.as_ref().map(|s| s.as_str()))
+        .bind(&job.job_type)
+        .bind(format!("{:?}", job.status))
+        .bind(format!("{:?}", job.generation_status))
+        .bind(job.priority)
+        .bind(job.attempts as i64)
+        .bind(&job.idempotency_key)
+        .bind(&job.correlation_id)
+        .bind(serde_json::to_string(&job.inputs).unwrap())
+        .bind(serde_json::to_string(&job.output_requirements).unwrap())
+        .bind(serde_json::to_string(&job.cost_ceiling).unwrap_or_default())
+        .bind(serde_json::to_string(&job.approval_gate).unwrap_or_default())
+        .bind(job.progress as i64)
+        .bind(job.error.as_ref().map(|s| s.as_str()))
+        .bind(job.error_code.as_ref().map(|s| s.as_str()))
+        .bind(job.retryable)
+        .bind(job.retry_after_seconds.map(|s| s as i64))
+        .bind(serde_json::to_string(&job.metrics).unwrap_or_default())
+        .bind(job.started_at.map(|t| t.to_rfc3339()))
+        .bind(job.finished_at.map(|t| t.to_rfc3339()))
+        .bind(job.created_at.to_rfc3339())
+        .bind(job.updated_at.to_rfc3339())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::new("save_job", e.to_string()))?;
+
+        Ok(())
+    }
+
+    pub async fn save_asset(&self, asset: &animatrix_assets::Asset) -> AppResult<()> {
+        sqlx::query(
+            r#"
+            INSERT OR REPLACE INTO assets (
+                id, project_id, channel_id, asset_type, source, provider, model,
+                path, hash, mime_type, size_bytes, metadata, created_at, parent_asset
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(asset.id.0.to_string())
+        .bind(asset.project_id.0.to_string())
+        .bind(asset.channel_id.0.to_string())
+        .bind(format!("{:?}", asset.asset_type))
+        .bind(format!("{:?}", asset.source))
+        .bind(asset.provider.map(|p| format!("{:?}", p)))
+        .bind(asset.model.as_ref().map(|s| s.as_str()))
+        .bind(&asset.path)
+        .bind(&asset.hash)
+        .bind(&asset.mime_type)
+        .bind(asset.size_bytes as i64)
+        .bind(serde_json::to_string(&asset.metadata).unwrap())
+        .bind(asset.created_at.to_rfc3339())
+        .bind(asset.parent_asset.map(|id| id.0.to_string()))
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::new("save_asset", e.to_string()))?;
+
+        Ok(())
+    }
+
+    pub async fn save_provider_health(&self, snapshot: &animatrix_core::ProviderHealthSnapshot) -> AppResult<()> {
+        sqlx::query(
+            r#"
+            INSERT OR REPLACE INTO providers (
+                id, provider_kind, health, last_probe_at, p95_latency_ms,
+                failure_rate, quota_remaining, rate_limit_reset_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(format!("{:?}", snapshot.provider))
+        .bind(format!("{:?}", snapshot.health))
+        .bind(snapshot.last_probe_at.map(|t| t.to_rfc3339()))
+        .bind(snapshot.p95_latency_ms.map(|ms| ms as i64))
+        .bind(snapshot.failure_rate)
+        .bind(snapshot.quota_remaining.map(|q| q as i64))
+        .bind(snapshot.rate_limit_reset_at.map(|t| t.to_rfc3339()))
+        .bind(Utc::now().to_rfc3339())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::new("save_provider_health", e.to_string()))?;
 
         Ok(())
     }
@@ -220,7 +460,6 @@ impl LocalStore {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use uuid::Uuid;
 
     #[test]
     fn database_url_uses_absolute_sqlite_uri() {
@@ -400,5 +639,55 @@ mod tests {
         store.save_channel(&channel).await.unwrap();
         let saved = store.list_channels().await.unwrap();
         assert_eq!(saved.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn can_persist_job_to_storage() {
+        let store = LocalStore::open("sqlite::memory:").await.unwrap();
+        let project_id = ProjectId(Uuid::new_v4());
+        let job = animatrix_jobs::JobManager::new_scene_job(project_id);
+
+        store.save_job(&job).await.unwrap();
+
+        let row = sqlx::query("SELECT id FROM jobs WHERE id = ?")
+            .bind(job.id.0.to_string())
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+
+        assert!(row.get::<String, _>("id").len() > 0);
+    }
+
+    #[tokio::test]
+    async fn can_persist_asset_to_storage() {
+        let store = LocalStore::open("sqlite::memory:").await.unwrap();
+        let now = Utc::now();
+
+        let asset = animatrix_assets::Asset {
+            id: animatrix_assets::AssetId(Uuid::new_v4()),
+            project_id: ProjectId(Uuid::new_v4()),
+            channel_id: ChannelId(Uuid::new_v4()),
+            asset_type: animatrix_assets::AssetType::Image,
+            source: animatrix_assets::AssetSource::Generated,
+            provider: None,
+            model: None,
+            path: "/tmp/test.png".to_string(),
+            hash: "sha256-test".to_string(),
+            mime_type: "image/png".to_string(),
+            size_bytes: 1024,
+            metadata: serde_json::json!({}),
+            created_at: now,
+            parent_asset: None,
+        };
+
+        store.save_asset(&asset).await.unwrap();
+
+        let row = sqlx::query("SELECT id FROM assets WHERE id = ?")
+            .bind(asset.id.0.to_string())
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+
+        assert!(row.get::<String, _>("id").len() > 0);
     }
 }

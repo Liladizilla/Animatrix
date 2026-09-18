@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+animatrix-assets = { path = "../animatrix-assets" }
 animatrix-core = { path = "../animatrix-core" }
+animatrix-jobs = { path = "../animatrix-jobs" }
 animatrix-domain = { path = "../animatrix-domain" }
 chrono = { workspace = true }
 serde = { workspace = true }
